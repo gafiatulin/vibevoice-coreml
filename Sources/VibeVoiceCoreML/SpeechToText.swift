@@ -118,7 +118,7 @@ public final class SpeechToText: @unchecked Sendable {
     private static func loadTokenizerSync(from dir: URL) throws -> any Tokenizer {
         // TokenizerLoader is async, but we need sync for init
         let semaphore = DispatchSemaphore(value: 0)
-        var result: Result<any Tokenizer, Error>!
+        nonisolated(unsafe) var result: Result<any Tokenizer, Error>!
         Task {
             do {
                 let tok = try await TokenizerLoader.load(from: dir)
