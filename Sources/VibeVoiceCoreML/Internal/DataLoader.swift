@@ -26,13 +26,16 @@ struct EmbeddingTable {
         }
 
         // Convert float16 → float32 using Swift's native Float16
+        // Explicit type annotations on all intermediate bindings to avoid Swift WMO
+        // compiler crash (whole-module optimization + type inference over pointer casts).
         let totalElems = rows * cols
-        data = raw.withUnsafeBytes { ptr -> [Float] in
-            let fp16Ptr = ptr.baseAddress!.advanced(by: headerSize)
-                .assumingMemoryBound(to: Float16.self)
-            let fp16Buffer = UnsafeBufferPointer(start: fp16Ptr, count: totalElems)
+        let floats: [Float] = raw.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> [Float] in
+            let base: UnsafeRawPointer = ptr.baseAddress!.advanced(by: headerSize)
+            let fp16Ptr: UnsafePointer<Float16> = base.assumingMemoryBound(to: Float16.self)
+            let fp16Buffer: UnsafeBufferPointer<Float16> = UnsafeBufferPointer(start: fp16Ptr, count: totalElems)
             return fp16Buffer.map { Float($0) }
         }
+        data = floats
     }
 
     /// Look up embeddings for token IDs. Returns flat array of (count * cols) floats.
@@ -127,11 +130,13 @@ struct VoicePrompt {
 
 // MARK: - Float16 Utilities
 
+// Explicit type annotations on all bindings to avoid Swift WMO compiler crash
+// (whole-module optimization + type inference over pointer casts).
 private func readFloat16(from data: Data, offset: Int, count: Int) -> [Float] {
-    data.withUnsafeBytes { ptr -> [Float] in
-        let fp16Ptr = ptr.baseAddress!.advanced(by: offset)
-            .assumingMemoryBound(to: Float16.self)
-        let buffer = UnsafeBufferPointer(start: fp16Ptr, count: count)
+    return data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> [Float] in
+        let base: UnsafeRawPointer = ptr.baseAddress!.advanced(by: offset)
+        let fp16Ptr: UnsafePointer<Float16> = base.assumingMemoryBound(to: Float16.self)
+        let buffer: UnsafeBufferPointer<Float16> = UnsafeBufferPointer(start: fp16Ptr, count: count)
         return buffer.map { Float($0) }
     }
 }
