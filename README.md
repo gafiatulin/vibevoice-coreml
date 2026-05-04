@@ -47,7 +47,7 @@ Requires macOS 15+. Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/gafiatulin/vibevoice-coreml", from: "0.0.1"),
+    .package(url: "https://github.com/gafiatulin/vibevoice-coreml", from: "x.x.x"),
 ],
 targets: [
     .target(
