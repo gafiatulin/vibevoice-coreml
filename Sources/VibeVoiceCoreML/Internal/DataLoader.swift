@@ -25,14 +25,8 @@ struct EmbeddingTable {
             throw VibeVoiceError.invalidData("Embedding file truncated: expected \(headerSize + expectedBytes), got \(raw.count)")
         }
 
-        // Convert float16 → float32 using Swift's native Float16
         let totalElems = rows * cols
-        data = raw.withUnsafeBytes { ptr -> [Float] in
-            let fp16Ptr = ptr.baseAddress!.advanced(by: headerSize)
-                .assumingMemoryBound(to: Float16.self)
-            let fp16Buffer = UnsafeBufferPointer(start: fp16Ptr, count: totalElems)
-            return fp16Buffer.map { Float($0) }
-        }
+        data = readFloat16(from: raw, offset: headerSize, count: totalElems)
     }
 
     /// Look up embeddings for token IDs. Returns flat array of (count * cols) floats.
@@ -127,11 +121,49 @@ struct VoicePrompt {
 
 // MARK: - Float16 Utilities
 
+/// Converts IEEE 754 half-precision (float16) bytes to Float32 values.
+/// Avoids using Swift's Float16 type directly, which causes compiler crashes
+/// under whole-module optimisation (WMO / Archive builds) in some Xcode toolchains.
 private func readFloat16(from data: Data, offset: Int, count: Int) -> [Float] {
-    data.withUnsafeBytes { ptr -> [Float] in
-        let fp16Ptr = ptr.baseAddress!.advanced(by: offset)
-            .assumingMemoryBound(to: Float16.self)
-        let buffer = UnsafeBufferPointer(start: fp16Ptr, count: count)
-        return buffer.map { Float($0) }
+    var result = [Float](repeating: 0, count: count)
+    data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
+        let base: UnsafeRawPointer = ptr.baseAddress!.advanced(by: offset)
+        let u16Ptr: UnsafePointer<UInt16> = base.assumingMemoryBound(to: UInt16.self)
+        for i in 0 ..< count {
+            result[i] = float16ToFloat32(u16Ptr[i])
+        }
     }
+    return result
+}
+
+/// Manual IEEE 754 half→float conversion (no Float16 type, no framework imports).
+@inline(__always)
+private func float16ToFloat32(_ h: UInt16) -> Float {
+    let sign:     UInt32 = UInt32(h & 0x8000) << 16
+    let exponent: UInt16 = (h >> 10) & 0x1F
+    let mantissa: UInt32 = UInt32(h & 0x03FF)
+
+    let bits: UInt32
+    if exponent == 0 {
+        if mantissa == 0 {
+            // ±zero
+            bits = sign
+        } else {
+            // Subnormal half → normalised float
+            var m = mantissa
+            var e: UInt32 = 127 - 14   // float32 bias - half bias
+            while (m & 0x0400) == 0 {
+                m <<= 1
+                e -= 1
+            }
+            bits = sign | (e << 23) | ((m & 0x03FF) << 13)
+        }
+    } else if exponent == 31 {
+        // Inf or NaN
+        bits = sign | 0x7F800000 | (mantissa << 13)
+    } else {
+        // Normal number: rebias exponent (127 - 15 = 112)
+        bits = sign | ((UInt32(exponent) + 112) << 23) | (mantissa << 13)
+    }
+    return Float(bitPattern: bits)
 }
